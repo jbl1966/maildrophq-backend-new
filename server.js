@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
@@ -10,15 +11,29 @@ app.use(express.json());
 
 const accounts = new Map(); // Key: prefix, Value: { id, token, address }
 
-function generateRandomEmail() {
+function isValidPrefix(prefix) {
+  return /^[a-zA-Z0-9._-]{3,30}$/.test(prefix);
+}
+
+function generateRandomPrefix() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const name = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-  return `${name}@punkproof.com`;
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
 app.get("/api/generate", async (req, res) => {
   try {
-    const address = generateRandomEmail();
+    let { prefix } = req.query;
+
+    if (prefix) {
+      if (!isValidPrefix(prefix)) {
+        return res.status(400).json({ error: "Invalid custom prefix. Use only letters, numbers, dots, dashes, and underscores (3–30 characters)." });
+      }
+    } else {
+      prefix = generateRandomPrefix();
+    }
+
+    const domain = "punkproof.com";
+    const address = `${prefix}@${domain}`;
     const password = "password123";
 
     const register = await fetch("https://api.mail.tm/accounts", {
@@ -43,7 +58,6 @@ app.get("/api/generate", async (req, res) => {
       throw new Error("Login failed");
     }
 
-    const [prefix, domain] = regData.address.split("@");
     accounts.set(prefix, {
       id: regData.id,
       token: tokenData.token,
@@ -99,6 +113,10 @@ app.get("/api/message", async (req, res) => {
     console.error("Message fetch error:", err);
     return res.status(500).json({ error: "Failed to load message." });
   }
+});
+
+app.get("/", (req, res) => {
+  res.send("✅ MailDropHQ Backend is running.");
 });
 
 app.listen(port, () => {
