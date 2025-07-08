@@ -17,7 +17,7 @@ app.get("/api/generate", async (req, res) => {
     const address = `${prefix}@${domain}`;
     const password = "password123";
 
-    // 1. Register new account
+    // Register account
     const regRes = await fetch("https://api.mail.tm/accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -29,16 +29,16 @@ app.get("/api/generate", async (req, res) => {
     try {
       regData = JSON.parse(regText);
     } catch (e) {
-      console.error("❌ Invalid JSON from register:", regText);
-      throw new Error("Registration JSON parse failed");
+      console.error("❌ Failed to parse registration response:", regText);
+      throw new Error("Invalid JSON during registration");
     }
 
     if (!regData.address) {
       console.error("❌ Registration failed:", regData);
-      throw new Error("Registration failed");
+      throw new Error(regData["hydra:description"] || "Registration failed");
     }
 
-    // 2. Log in to get token
+    // Login to get token
     const loginRes = await fetch("https://api.mail.tm/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -50,21 +50,30 @@ app.get("/api/generate", async (req, res) => {
     try {
       loginData = JSON.parse(loginText);
     } catch (e) {
-      console.error("❌ Invalid JSON from login:", loginText);
-      throw new Error("Login JSON parse failed");
+      console.error("❌ Failed to parse login response:", loginText);
+      throw new Error("Invalid JSON during login");
     }
 
     if (!loginData.token) {
       console.error("❌ Login failed:", loginData);
-      throw new Error("Login failed");
+      throw new Error(loginData["hydra:description"] || "Login failed");
     }
 
-    // 3. Save to in-memory map
     accounts.set(prefix, {
       id: regData.id,
       token: loginData.token,
       address: regData.address,
     });
+
+    console.log("✅ Email generated:", regData.address);
+    return res.json({ prefix, domain });
+
+  } catch (err) {
+    console.error("🚨 Email generation error:", err.message);
+    return res.status(500).json({ error: "Email generation failed." });
+  }
+});
+
 
     console.log("✅ Email generated:", regData.address);
     return res.json({ prefix, domain });
