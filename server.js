@@ -8,73 +8,130 @@ const port = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-const accounts = new Map();
+const accounts = new Map(); // Stores: { id, token, address }
 
-function generateEmailAddress(prefix) {
-  const random = prefix || Math.random().toString(36).substring(2, 10);
-  return `${random}@punkproof.com`;
+function generateRandomPrefix() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
+// Utility: create and log in to a mail.tm account
+async function createMailTmAccount(prefix = "") {
+  const domain = "punkproof.com";
+  const address = `${prefix}@${domain}`;
+  const password = "password123";
+
+  // Register
+  const registerRes = await fetch("https://api.mail.tm/accounts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address, password }),
+  });
+
+  const regData = await registerRes.json();
+  if (!regData.address) {
+    throw new Error("Registration failed");
+  }
+
+  // Login
+  const loginRes = await fetch("https://api.mail.tm/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address, password }),
+  });
+
+  const tokenData = await loginRes.json();
+  if (!tokenData.token) {
+    throw new Error("Login failed");
+  }
+
+  const [actualPrefix] = regData.address.split("@");
+  accounts.set(actualPrefix, {
+    id: regData.id,
+    token: tokenData.token,
+    address: regData.address,
+  });
+
+  return { prefix: actualPrefix, domain };
+}
+
+// ✅ Generate email (random or custom)
 app.get("/api/generate", async (req, res) => {
   try {
-    const prefix = req.query.prefix;
-    const address = generateEmailAddress(prefix);
-    const password = "password123";
+    const requestedPrefix = req.query.prefix;
+    const isCustom = !!requestedPrefix;
+    const prefix = isCustom ? requestedPrefix.toLowerCase() : generateRandomPrefix();
 
-    const register = await fetch("https://api.mail.tm/accounts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, password }),
-    });
+    // Validate prefix for custom emails
+    if (isCustom && !/^[a-zA-Z0-9._-]{3,30}$/.test(prefix)) {
+      return res.status(400).json({ error: "Invalid custom prefix format." });
+    }
 
-    const regData = await register.json();
-    if (!regData.address) throw new Error("Registration failed");
+    // Avoid duplicate regeneration
+    if (accounts.has(prefix)) {
+      const domain = "punkproof.com";
+      return res.json({ prefix, domain });
+    }
 
-    const login = await fetch("https://api.mail.tm/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, password }),
-    });
-
-    const tokenData = await login.json();
-    if (!tokenData.token) throw new Error("Login failed");
-
-    const [actualPrefix, domain] = regData.address.split("@");
-    accounts.set(actualPrefix, {
-      id: regData.id,
-      token: tokenData.token,
-      address: regData.address,
-    });
-
-    res.json({ prefix: actualPrefix, domain });
+    const result = await createMailTmAccount(prefix);
+    res.json(result);
   } catch (err) {
-    console.error("Email generation error:", err);
+    console.error("Email generation error:", err.message);
     res.status(500).json({ error: "Email generation failed." });
   }
 });
 
+// ✅ Get inbox messages
 app.get("/api/messages", async (req, res) => {
   const { prefix } = req.query;
-  if (!accounts.has(prefix)) return res.status(404).json({ error: "Unknown email prefix." });
+
+  if (!prefix || !accounts.has(prefix)) {
+    return res.status(404).json({ error: "Unknown or missing email prefix." });
+  }
 
   const { token } = accounts.get(prefix);
-  const response = await fetch("https://api.mail.tm/messages", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await response.json();
-  res.json(data["hydra:member"] || []);
+
+  try {
+    const inboxRes = await fetch("https://api.mail.tm/messages", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const inboxData = await inboxRes.json();
+    res.json(inboxData["hydra:member"] || []);
+  } catch (err) {
+    console.error("Inbox fetch error:", err.message);
+    res.status(500).json({ error: "Failed to load inbox." });
+  }
 });
 
+// ✅ Get specific message
 app.get("/api/message", async (req, res) => {
   const { prefix, id } = req.query;
-  if (!accounts.has(prefix)) return res.status(404).json({ error: "Unknown email prefix." });
+
+  if (!prefix || !id || !accounts.has(prefix)) {
+    return res.status(404).json({ error: "Invalid request or unknown prefix." });
+  }
 
   const { token } = accounts.get(prefix);
-  const response = await fetch(`https://api.mail.tm/messages/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await response.json();
-  res.json(data);
+
+  try {
+    const msgRes = await fetch(`https://api.mail.tm/messages/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const msgData = await msgRes.json();
+    res.json(msgData);
+  } catch (err) {
+    console.error("Message fetch error:", err.message);
+    res.status(500).json({ error: "Failed to load message." });
+  }
 });
 
-app.listen(port, () => console.log(`✅ MailDropHQ Backend running on ${port}`));
+// ✅ Root route
+app.get("/", (req, res) => {
+  res.send("✅ MailDropHQ Backend is running.");
+});
+
+app.listen(port, () => {
+  console.log(`✅ MailDropHQ Backend is running on port ${port}`);
+});
