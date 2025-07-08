@@ -9,7 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 const accounts = new Map(); // Stores: { id, token, address }
-
+  
 function generateRandomPrefix() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
@@ -57,27 +57,58 @@ async function createMailTmAccount(prefix = "") {
 
 // ✅ Generate email (random or custom)
 app.get("/api/generate", async (req, res) => {
+  const requestedPrefix = req.query.prefix;
+  const domain = "punkproof.com";
+  const prefix = requestedPrefix || Math.random().toString(36).substring(2, 10);
+  const address = `${prefix}@${domain}`;
+  const password = "password123";
+
   try {
-    const requestedPrefix = req.query.prefix;
-    const isCustom = !!requestedPrefix;
-    const prefix = isCustom ? requestedPrefix.toLowerCase() : generateRandomPrefix();
+    // Register with Mail.tm
+    const register = await fetch("https://api.mail.tm/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address, password }),
+    });
 
-    // Validate prefix for custom emails
-    if (isCustom && !/^[a-zA-Z0-9._-]{3,30}$/.test(prefix)) {
-      return res.status(400).json({ error: "Invalid custom prefix format." });
+    const regText = await register.text();
+    let regData;
+
+    try {
+      regData = JSON.parse(regText);
+    } catch (jsonErr) {
+      console.error("❌ Failed to parse Mail.tm register response:", regText);
+      throw new Error("Invalid response from Mail.tm register.");
     }
 
-    // Avoid duplicate regeneration
-    if (accounts.has(prefix)) {
-      const domain = "punkproof.com";
-      return res.json({ prefix, domain });
+    if (!regData.address) {
+      console.error("❌ Mail.tm registration failed:", regData);
+      throw new Error("Mail.tm registration failed.");
     }
 
-    const result = await createMailTmAccount(prefix);
-    res.json(result);
+    // Login to get token
+    const login = await fetch("https://api.mail.tm/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address, password }),
+    });
+
+    const tokenData = await login.json();
+    if (!tokenData.token) {
+      console.error("❌ Mail.tm login failed:", tokenData);
+      throw new Error("Mail.tm login failed.");
+    }
+
+    accounts.set(prefix, {
+      id: regData.id,
+      token: tokenData.token,
+      address: regData.address,
+    });
+
+    return res.json({ prefix, domain });
   } catch (err) {
-    console.error("Email generation error:", err.message);
-    res.status(500).json({ error: "Email generation failed." });
+    console.error("❌ Email generation error:", err);
+    return res.status(500).json({ error: "Email generation failed." });
   }
 });
 
