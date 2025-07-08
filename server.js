@@ -58,13 +58,22 @@ async function createMailTmAccount(prefix = "") {
 // ✅ Generate email (random or custom)
 app.get("/api/generate", async (req, res) => {
   const requestedPrefix = req.query.prefix;
-  const domain = "punkproof.com";
-  const prefix = requestedPrefix || Math.random().toString(36).substring(2, 10);
-  const address = `${prefix}@${domain}`;
   const password = "password123";
 
   try {
-    // Register with Mail.tm
+    // ✅ Get a valid mail.tm domain
+    const domainRes = await fetch("https://api.mail.tm/domains");
+    const domainData = await domainRes.json();
+    const domain = domainData["hydra:member"]?.[0]?.domain;
+
+    if (!domain) {
+      throw new Error("No valid mail.tm domain found.");
+    }
+
+    const prefix = requestedPrefix || Math.random().toString(36).substring(2, 10);
+    const address = `${prefix}@${domain}`;
+
+    // ✅ Register
     const register = await fetch("https://api.mail.tm/accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -77,8 +86,8 @@ app.get("/api/generate", async (req, res) => {
     try {
       regData = JSON.parse(regText);
     } catch (jsonErr) {
-      console.error("❌ Failed to parse Mail.tm register response:", regText);
-      throw new Error("Invalid response from Mail.tm register.");
+      console.error("❌ Failed to parse registration response:", regText);
+      throw new Error("Invalid register response.");
     }
 
     if (!regData.address) {
@@ -86,7 +95,7 @@ app.get("/api/generate", async (req, res) => {
       throw new Error("Mail.tm registration failed.");
     }
 
-    // Login to get token
+    // ✅ Login
     const login = await fetch("https://api.mail.tm/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
