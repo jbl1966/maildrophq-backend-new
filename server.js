@@ -13,49 +13,64 @@ const accounts = new Map(); // Key: prefix, Value: { id, token, address }
 app.get("/api/generate", async (req, res) => {
   try {
     const prefix = req.query.prefix || Math.random().toString(36).substring(2, 10);
-    const address = `${prefix}@punkproof.com`;
+    const domain = "punkproof.com";
+    const address = `${prefix}@${domain}`;
     const password = "password123";
 
-    const register = await fetch("https://api.mail.tm/accounts", {
+    // 1. Register new account
+    const regRes = await fetch("https://api.mail.tm/accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address, password }),
     });
 
-    const regText = await register.text();
+    const regText = await regRes.text();
     let regData = {};
     try {
       regData = JSON.parse(regText);
-    } catch {
-      throw new Error("Invalid response from mail.tm (register)");
+    } catch (e) {
+      console.error("❌ Invalid JSON from register:", regText);
+      throw new Error("Registration JSON parse failed");
     }
 
     if (!regData.address) {
+      console.error("❌ Registration failed:", regData);
       throw new Error("Registration failed");
     }
 
-    const login = await fetch("https://api.mail.tm/token", {
+    // 2. Log in to get token
+    const loginRes = await fetch("https://api.mail.tm/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address, password }),
     });
 
-    const loginData = await login.json();
+    const loginText = await loginRes.text();
+    let loginData = {};
+    try {
+      loginData = JSON.parse(loginText);
+    } catch (e) {
+      console.error("❌ Invalid JSON from login:", loginText);
+      throw new Error("Login JSON parse failed");
+    }
+
     if (!loginData.token) {
+      console.error("❌ Login failed:", loginData);
       throw new Error("Login failed");
     }
 
-    const [actualPrefix, domain] = regData.address.split("@");
-
-    accounts.set(actualPrefix, {
+    // 3. Save to in-memory map
+    accounts.set(prefix, {
       id: regData.id,
       token: loginData.token,
       address: regData.address,
     });
 
-    return res.json({ prefix: actualPrefix, domain });
+    console.log("✅ Email generated:", regData.address);
+    return res.json({ prefix, domain });
+
   } catch (err) {
-    console.error("Email generation error:", err);
+    console.error("🚨 Email generation error:", err.message);
     return res.status(500).json({ error: "Email generation failed." });
   }
 });
